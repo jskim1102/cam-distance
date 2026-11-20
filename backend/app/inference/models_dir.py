@@ -1,6 +1,6 @@
 """단일 활성 YOLO 가중치 관리.
 
-기본값은 ``yolo26x.pt``이고, 사용자가 올린 `.pt`가 있으면 그 모델 하나로 교체한다.
+``YOLO_DEFAULT_MODEL``에서 선택한 공식 모델을 사용하고, 업로드된 가중치가 있으면 이를 우선한다.
 임의 경로는 계속 차단하고, custom 원본 이름은 고정된 ``WEIGHTS_DIR/custom.pt``
 로만 해석한다.
 API 프로세스는 ultralytics를 import하지 않으며 클래스 추출은 짧은 subprocess에서 한다.
@@ -17,21 +17,12 @@ from pathlib import Path
 from typing import Any
 
 from app import config
+from app.config import PRESET_MODELS
 
-DEFAULT_MODEL = "yolo26x.pt"
 CUSTOM_FILENAME = "custom.pt"
 CUSTOM_METADATA_FILENAME = "custom.json"
 MAX_UPLOAD_BYTES = 600 * 1024 * 1024
 CLASS_EXTRACTION_TIMEOUT_SEC = 60
-
-# Preset 모델 — UI 토글 + worker 자동 다운로드 기본값. 신뢰경계: ultralytics 공식 가중치만.
-PRESET_MODELS: tuple[str, ...] = (
-    "yolo26n.pt",
-    "yolo26s.pt",
-    "yolo26m.pt",
-    "yolo26l.pt",
-    "yolo26x.pt",
-)
 
 # 허용된 YOLO26 detection preset은 모두 COCO 80-class 모델이다. 클래스 설정 UI가
 # 이름만 표시하려고 가중치 전체를 다운로드하지 않도록 메타데이터를 별도로 보관한다.
@@ -197,7 +188,7 @@ def is_allowed_model(name: str) -> bool:
 def get_active_model_name() -> str:
     """현재 단일 활성 모델 이름을 반환한다."""
     metadata = get_custom_metadata()
-    return str(metadata["original_name"]) if metadata is not None else DEFAULT_MODEL
+    return str(metadata["original_name"]) if metadata is not None else config.YOLO_DEFAULT_MODEL
 
 
 def get_active_model_names() -> list[str]:
@@ -209,7 +200,8 @@ def get_active_weights_status() -> dict:
     metadata = get_custom_metadata()
     if metadata is None:
         return {
-            "active_name": DEFAULT_MODEL,
+            "active_name": config.YOLO_DEFAULT_MODEL,
+            "default_name": config.YOLO_DEFAULT_MODEL,
             "type": "preset",
             "uploaded_at": None,
             "size_mb": None,
@@ -217,6 +209,7 @@ def get_active_weights_status() -> dict:
         }
     return {
         "active_name": metadata["original_name"],
+        "default_name": config.YOLO_DEFAULT_MODEL,
         "type": "custom",
         "uploaded_at": metadata["uploaded_at"],
         "size_mb": metadata["size_bytes"] / 1024 / 1024,
@@ -252,7 +245,7 @@ def list_model_classes(name: str) -> list[dict]:
 def list_active_classes() -> list[dict]:
     metadata = get_custom_metadata()
     if metadata is None:
-        return list_model_classes(DEFAULT_MODEL)
+        return list_model_classes(config.YOLO_DEFAULT_MODEL)
     return list(metadata["classes"])
 
 

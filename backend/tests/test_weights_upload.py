@@ -32,7 +32,7 @@ def client(
     monkeypatch.setattr(models_dir, "extract_model_classes", lambda _path: classes)
 
     activation_calls: list[tuple[object, ...]] = []
-    current_model = [models_dir.DEFAULT_MODEL]
+    current_model = [config.YOLO_DEFAULT_MODEL]
 
     def record_model(name: str, *, force_reload: bool = False) -> None:
         activation_calls.append(("model", name, force_reload))
@@ -66,11 +66,14 @@ def client(
 
 def test_default_weights_status_uses_yolo26x_and_exposes_coco_classes(
     weights_dir: Path,
+    monkeypatch,
 ) -> None:
+    monkeypatch.setattr(config, "YOLO_DEFAULT_MODEL", "yolo26x.pt")
     status = models_dir.get_active_weights_status()
 
     assert status == {
         "active_name": "yolo26x.pt",
+        "default_name": "yolo26x.pt",
         "type": "preset",
         "uploaded_at": None,
         "size_mb": None,
@@ -263,15 +266,24 @@ def test_reuploading_the_same_named_weights_force_reloads_once(
     ]
 
 
-def test_delete_custom_weights_restores_the_single_preset_model(
+@pytest.mark.parametrize("default_name", ["yolo26x.pt", "yolo26n.pt"])
+def test_delete_custom_weights_restores_configured_preset(
     client: tuple[TestClient, MagicMock, MagicMock, list[tuple[object, ...]]],
     weights_dir: Path,
+    monkeypatch,
+    default_name: str,
 ) -> None:
+    monkeypatch.setattr(config, "YOLO_DEFAULT_MODEL", default_name)
     http, set_model, set_all_sources, activation_calls = client
-    assert http.post(
+    assert models_dir.get_active_model_name() == default_name
+    assert http.get("/api/inference/weights").json()["active_name"] == default_name
+    upload = http.post(
         "/api/inference/weights",
         files={"file": ("custom-model.pt", b"weights", "application/octet-stream")},
-    ).status_code == 200
+    )
+    assert upload.status_code == 200
+    assert upload.json()["active_name"] == "custom-model.pt"
+    assert upload.json()["default_name"] == default_name
     set_model.reset_mock()
     set_all_sources.reset_mock()
     activation_calls.clear()
@@ -280,7 +292,8 @@ def test_delete_custom_weights_restores_the_single_preset_model(
 
     assert response.status_code == 200
     assert response.json() == {
-        "active_name": "yolo26x.pt",
+        "active_name": default_name,
+        "default_name": default_name,
         "type": "preset",
         "uploaded_at": None,
         "size_mb": None,
@@ -288,11 +301,11 @@ def test_delete_custom_weights_restores_the_single_preset_model(
     }
     assert not (weights_dir / "custom.pt").exists()
     assert not (weights_dir / "custom.json").exists()
-    set_model.assert_called_once_with("yolo26x.pt", force_reload=False)
-    set_all_sources.assert_called_once_with(["yolo26x.pt"])
+    set_model.assert_called_once_with(default_name, force_reload=False)
+    set_all_sources.assert_called_once_with([default_name])
     assert activation_calls == [
-        ("sources", ["yolo26x.pt"]),
-        ("model", "yolo26x.pt", False),
+        ("sources", [default_name]),
+        ("model", default_name, False),
     ]
     classes_response = http.get("/api/inference/classes")
     assert classes_response.status_code == 200
@@ -343,12 +356,12 @@ def test_delete_reports_preset_as_active_when_lane_refresh_fails(
 
     assert response.status_code == 202
     body = response.json()
-    assert body["active_name"] == "yolo26x.pt"
+    assert body["active_name"] == body["default_name"] == config.YOLO_DEFAULT_MODEL
     assert "다시 시도" in body["refresh_error"]
     assert not (weights_dir / "custom.pt").exists()
     assert not (weights_dir / "custom.json").exists()
     assert http.get("/api/inference/weights").json()["active_name"] == body["active_name"]
-    set_all_sources.assert_called_once_with(["yolo26x.pt"])
+    set_all_sources.assert_called_once_with([config.YOLO_DEFAULT_MODEL])
 
 
 def test_invalid_extension_and_oversized_upload_leave_no_files(

@@ -206,6 +206,7 @@ describe("weights status compatibility", () => {
 
     expect(readWeightsStatus(oldShape)).toBeNull();
     expect(readWeightsStatus({ active_name: "best.pt" })).toBeNull();
+    expect(readWeightsStatus({ active_name: "best.pt", uploaded_at: null, default_name: {} })).toBeNull();
     expect(keepMeasurementsForActiveModel(stored, oldShape)).toBe(stored);
   });
 

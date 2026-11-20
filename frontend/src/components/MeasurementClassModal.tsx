@@ -202,7 +202,7 @@ export default function MeasurementClassModal({
             disabled={locked}
             onClick={onResetWeights}
           >
-            기본(yolo26x.pt)으로 되돌리기
+            기본{weights.default_name ? `(${weights.default_name})` : ""}으로 되돌리기
           </button>
         )}
         {weightsBusy && (

@@ -41,10 +41,12 @@ export function readWeightsStatus(value: unknown): WeightsStatus | null {
   if (typeof value !== "object" || value === null) return null;
   const status = value as {
     active_name?: unknown;
+    default_name?: unknown;
     uploaded_at?: unknown;
     refresh_error?: unknown;
   };
   if (typeof status.active_name !== "string") return null;
+  if (status.default_name !== undefined && typeof status.default_name !== "string") return null;
   if (status.uploaded_at !== null && typeof status.uploaded_at !== "string") return null;
   if (status.refresh_error !== undefined && typeof status.refresh_error !== "string") return null;
   return value as WeightsStatus;

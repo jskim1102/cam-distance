@@ -97,6 +97,7 @@ def get_model_classes(name: str) -> list[dict]:
 
 class WeightsStatus(BaseModel):
     active_name: str
+    default_name: str
     type: str
     uploaded_at: str | None
     size_mb: float | None
@@ -209,7 +210,7 @@ async def upload_custom_weights(response: Response, file: UploadFile = File(...)
     response_model_exclude_unset=True,
 )
 def reset_custom_weights(response: Response) -> dict:
-    """custom 가중치를 제거하고 단일 활성 모델을 yolo26x.pt로 복귀시킨다."""
+    """업로드된 가중치를 제거하고 설정된 기본 모델로 복귀한다."""
     models_dir.delete_custom_weights()
     active_status, refreshed = _refresh_source_models_and_status()
     if not refreshed:

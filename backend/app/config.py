@@ -33,7 +33,15 @@ MEDIAMTX_BACKEND_PASS: str = os.getenv("MEDIAMTX_BACKEND_PASS", "")
 MEDIAMTX_WEBRTC_HOST: str = os.getenv("MEDIAMTX_WEBRTC_HOST", "")
 
 # ── detection (YOLO 추론 — rtsp-detection 모듈과 동일 런타임 계약) ──
-YOLO_DEFAULT_MODEL: str = os.getenv("YOLO_DEFAULT_MODEL") or "yolo26x.pt"
+PRESET_MODELS: tuple[str, ...] = (
+    "yolo26n.pt",
+    "yolo26s.pt",
+    "yolo26m.pt",
+    "yolo26l.pt",
+    "yolo26x.pt",
+)
+_raw_yolo_model = os.getenv("YOLO_DEFAULT_MODEL", "")
+YOLO_DEFAULT_MODEL = _raw_yolo_model if _raw_yolo_model in PRESET_MODELS else "yolo26x.pt"
 YOLO_WEIGHTS_DIR = Path(__file__).resolve().parents[1] / (os.getenv("YOLO_WEIGHTS_DIR") or "models")
 # 업로드된 전역 가중치 저장소. host dev 는 backend/data/weights, compose 는 env 로
 # /app/data/weights 를 주입해 같은 코드가 양쪽에서 동작한다.
@@ -98,6 +106,11 @@ def setup_logging() -> logging.Logger:
 
 logger = setup_logging()
 
+if _raw_yolo_model and _raw_yolo_model != YOLO_DEFAULT_MODEL:
+    logger.warning(
+        "YOLO_DEFAULT_MODEL=%r 가 공식 모델 목록에 없어 %s를 사용합니다",
+        _raw_yolo_model, YOLO_DEFAULT_MODEL,
+    )
 if _raw_max_ipcams != MAX_IPCAMS:
     logger.warning("MAX_IPCAMS=%d → %d 로 보정됨 (허용 범위: 1~64)", _raw_max_ipcams, MAX_IPCAMS)
 for _warning in (_conf_warn,):

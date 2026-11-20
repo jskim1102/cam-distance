@@ -189,12 +189,12 @@ def test_per_camera_inference_can_enable_with_default_preset_without_custom_weig
 
     response = client.put(
         f"/api/ipcams/{cam['stream_key']}/inference",
-        json={"enabled": True, "models": ["yolo26x.pt"]},
+        json={"enabled": True, "models": [config.YOLO_DEFAULT_MODEL]},
     )
 
     assert response.status_code == 200
     assert response.json()["enabled"] is True
-    assert response.json()["models"] == ["yolo26x.pt"]
+    assert response.json()["models"] == [config.YOLO_DEFAULT_MODEL]
 
     response = client.put(
         f"/api/ipcams/{cam['stream_key']}/inference",

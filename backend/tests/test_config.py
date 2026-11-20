@@ -59,6 +59,20 @@ def test_empty_yolo_model_uses_yolo26x_default(monkeypatch):
     assert config.YOLO_DEFAULT_MODEL == "yolo26x.pt"
 
 
+def test_unset_yolo_model_uses_yolo26x_default(monkeypatch):
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.delenv("YOLO_DEFAULT_MODEL", raising=False)
+    assert _reload_config(monkeypatch).YOLO_DEFAULT_MODEL == "yolo26x.pt"
+
+
+def test_invalid_yolo_default_model_falls_back_with_one_warning(monkeypatch, caplog):
+    config = _reload_config(monkeypatch, YOLO_DEFAULT_MODEL="unknown.pt")
+    assert config.YOLO_DEFAULT_MODEL == "yolo26x.pt"
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "unknown.pt" in warnings[0] and "yolo26x.pt" in warnings[0]
+
+
 def test_explicit_yolo_model_override_is_respected(monkeypatch):
     config = _reload_config(monkeypatch, YOLO_DEFAULT_MODEL="yolo26s.pt")
     assert config.YOLO_DEFAULT_MODEL == "yolo26s.pt"

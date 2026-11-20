@@ -24,6 +24,7 @@ export interface AutoMeasurement {
 
 export interface WeightsStatus {
   active_name: string;
+  default_name?: string;
   type: "preset" | "custom";
   uploaded_at: string | null;
   size_mb: number | null;

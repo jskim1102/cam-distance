@@ -22,7 +22,7 @@ cd cam-distance
 * 자동 거리 측정 — YOLO 가 객체를 찾고, 고른 클래스의 객체와 가장 가까운 객체 사이에 선과 거리(m) 표시.
 * 클래스 1개를 고르면 같은 클래스끼리, 2개를 고르면 첫 번째 클래스에서 두 번째 클래스까지 측정.
 * 거리는 박스 아래쪽 가운데(바닥에 닿는 점) 기준.
-* 검출 모델은 `yolo26x` 기본, 직접 학습한 `.pt` 업로드로 교체 가능.
+* 검출 모델은 `yolo26n` ~ `yolo26x` 5종 중 하나를 기본으로 지정 (`yolo26x` 기본), 직접 학습한 `.pt` 업로드로 교체 가능.
 * 영상 경로와 추론 경로 분리 — 추론이 느려져도 영상은 끊김 없음.
 * 카메라 수와 GPU 부하에 맞춰 추론 해상도 · 속도 자동 조절.
 * `docker compose` 한 번으로 **backend + frontend + MediaMTX 세 컨테이너** 동시 실행.
@@ -45,13 +45,14 @@ cd cam-distance
 | `MEDIAMTX_BACKEND_PASS` | 자동&nbsp;(무작위) | MediaMTX 제어용 비밀번호 |
 | `MEDIAMTX_VIEWER_PASS` | 자동&nbsp;(무작위) | 영상 시청용 비밀번호 |
 | `MEDIAMTX_WEBRTC_HOST` | setup&nbsp;이&nbsp;질문 | 브라우저가 이 PC 에 닿는 주소 전부 (쉼표 구분) |
+| `YOLO_DEFAULT_MODEL` | `yolo26x.pt` | 기본 검출 모델 |
 | `YOLO_CONF_THRESHOLD` | `0.5` | 객체로 볼 최소 신뢰도 기본값 |
 | `YOLO_DEVICE` | 빈칸 | 추론 장치 (빈칸 = 자동) |
 | `WEIGHTS_DIR` | 빈칸 | 업로드한 모델 저장 폴더 (빈칸 = 기본 위치) |
 | `MAX_IPCAMS` | 선택&nbsp;(직접&nbsp;추가) | 등록 가능 카메라 수 (기본 16) |
 
 * MediaMTX 포트 4개는 아래 "포트 · 방화벽" 참고.
-* 나머지 값(`MEDIAMTX_API`, `MEDIAMTX_VIEWER_USER`, `YOLO_DEFAULT_MODEL`)은 기본값 그대로 유지.
+* 나머지 값(`MEDIAMTX_API`, `MEDIAMTX_VIEWER_USER`)은 기본값 그대로 유지.
 * Docker 에서 쓸 수 있는 NVIDIA GPU 가 있으면 setup 이 `.env` 에 `COMPOSE_FILE` 을 넣어 GPU 설정(`docker-compose.gpu.yml`) 적용.
 * GPU 가 없으면 `COMPOSE_FILE` 없이 CPU 로 실행.
 * `MEDIAMTX_WEBRTC_HOST`
@@ -60,6 +61,12 @@ cd cam-distance
   * **비우면 이 PC에서만 영상 표시.**
   * **목록에 없는 주소로 접속하면 화면은 열려도 영상은 검은 화면.**
   * LAN IP 찾는 법: `hostname -I` (Linux) · `ipconfig getifaddr en0` (macOS) · `ipconfig` (Windows).
+* `YOLO_DEFAULT_MODEL`
+  * `yolo26n.pt` · `yolo26s.pt` · `yolo26m.pt` · `yolo26l.pt` · `yolo26x.pt` 중 하나.
+  * 뒤로 갈수록 정확하지만 무거움 — GPU 메모리가 작으면 `yolo26n.pt` 쪽.
+  * 비우거나 목록에 없는 이름이면 `yolo26x.pt` 사용.
+  * 화면에서 `.pt` 를 업로드하면 업로드한 모델이 우선, "기본으로 되돌리기" 는 이 값으로 복귀.
+  * 바꾸면 화면에서 측정 클래스를 다시 선택.
 * `YOLO_DEVICE`
   * 빈칸이면 GPU 가 있을 때 GPU, 없으면 CPU.
   * 예: `cpu`, `cuda:0` (첫 번째 GPU).
