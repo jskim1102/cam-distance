@@ -1,0 +1,217 @@
+"""추론 제어 + 모델 가중치 관리 라우터 (/api/inference/*).
+
+deepeye-lite ipcam.py 의 inference_router 차용. main.py 에서 include_router(inference_router).
+"""
+
+import logging
+import tempfile
+from pathlib import Path
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile
+from pydantic import BaseModel
+
+from app.inference import models_dir
+from app.streaming.manager import manager as stream_manager
+
+
+logger = logging.getLogger(__name__)
+WEIGHTS_REFRESH_ERROR = (
+    "가중치는 변경되었지만 추론 워커 갱신에 실패했습니다. 다시 시도하세요."
+)
+
+
+# ─── 추론 제어 (모델 토글, ON/OFF, conf threshold) ───
+
+
+class InferenceConfig(BaseModel):
+    enabled: bool
+    model: str
+    conf_threshold: float
+    device: str
+    gpu_util_target: float
+    gpu_util_duty: float
+
+
+class InferenceConfigUpdate(BaseModel):
+    enabled: bool | None = None
+    model: str | None = None
+    conf_threshold: float | None = None
+    gpu_util_target: float | None = None
+
+
+inference_router = APIRouter(prefix="/api/inference", tags=["inference"])
+
+
+@inference_router.get("/config", response_model=InferenceConfig)
+def get_inference_config() -> dict:
+    """현재 추론 워커 상태."""
+    return stream_manager.get_inference_config()
+
+
+@inference_router.put("/config", response_model=InferenceConfig)
+def update_inference_config(body: InferenceConfigUpdate) -> dict:
+    """추론 ON/OFF · 모델 · conf threshold 변경. 부분 업데이트 지원."""
+    if body.enabled is not None:
+        stream_manager.set_inference_enabled(body.enabled)
+    if body.model is not None:
+        active_name = models_dir.get_active_model_name()
+        if body.model != active_name:
+            raise HTTPException(
+                status_code=400,
+                detail=f"현재 활성 모델은 {active_name}입니다",
+            )
+        stream_manager.set_inference_model(body.model)
+    if body.conf_threshold is not None:
+        stream_manager.set_inference_conf_threshold(body.conf_threshold)
+    if body.gpu_util_target is not None:
+        stream_manager.set_gpu_util_target(body.gpu_util_target)
+    return stream_manager.get_inference_config()
+
+
+# ─── 모델 목록 + 클래스 메타 ───
+
+
+class ModelInfo(BaseModel):
+    name: str
+    type: str
+    size_mb: float | None = None
+
+
+@inference_router.get("/models", response_model=list[ModelInfo])
+def list_models() -> list[dict]:
+    """preset(YOLO26 5종)과 활성 custom이 있으면 그 하나를 반환한다."""
+    return models_dir.list_all_models()
+
+
+@inference_router.get("/models/{name}/classes")
+def get_model_classes(name: str) -> list[dict]:
+    """주어진 preset 모델의 클래스 ID→이름 목록.
+
+    허용된 YOLO26 detection preset은 모두 COCO 80-class 모델이다. 클래스 이름 조회는
+    정적 메타데이터만 반환하고 가중치 다운로드·모델 로드를 시작하지 않는다.
+    """
+    if not models_dir.is_preset(name):
+        raise HTTPException(status_code=404, detail="알 수 없는 모델 (preset 만 가능)")
+
+    return models_dir.list_model_classes(name)
+
+
+class WeightsStatus(BaseModel):
+    active_name: str
+    type: str
+    uploaded_at: str | None
+    size_mb: float | None
+    class_count: int
+    refresh_error: str | None = None
+
+
+def _refresh_source_models(*, force_reload: bool = False) -> None:
+    """worker와 모든 source를 현재 단일 활성 모델로 맞춘다."""
+    active_name = models_dir.get_active_model_name()
+    current_name = stream_manager.get_inference_config().get("model")
+    reload_same_name = force_reload and current_name == active_name
+    stream_manager.set_all_source_models([active_name])
+    stream_manager.set_inference_model(active_name, force_reload=reload_same_name)
+
+
+def _refresh_source_models_and_status(*, force_reload: bool = False) -> tuple[dict, bool]:
+    """가중치 교체 후 refresh 실패도 이미 적용된 활성 상태와 함께 보고한다."""
+    try:
+        _refresh_source_models(force_reload=force_reload)
+    except Exception:
+        logger.exception("가중치 교체 후 추론 워커 갱신 실패")
+        active_status = models_dir.get_active_weights_status()
+        active_status["refresh_error"] = WEIGHTS_REFRESH_ERROR
+        return active_status, False
+    return models_dir.get_active_weights_status(), True
+
+
+@inference_router.get(
+    "/weights",
+    response_model=WeightsStatus,
+    response_model_exclude_unset=True,
+)
+def get_active_weights() -> dict:
+    return models_dir.get_active_weights_status()
+
+
+@inference_router.get("/classes")
+def get_active_classes() -> list[dict]:
+    """현재 단일 활성 가중치의 클래스 목록."""
+    return models_dir.list_active_classes()
+
+
+@inference_router.post(
+    "/weights",
+    response_model=WeightsStatus,
+    response_model_exclude_unset=True,
+)
+async def upload_custom_weights(response: Response, file: UploadFile = File(...)) -> dict:
+    """최대 600MB `.pt`를 검증해 현재 단일 활성 가중치로 교체한다."""
+    original_name = Path(file.filename or "").name
+    if not original_name or Path(original_name).suffix.lower() != ".pt":
+        raise HTTPException(status_code=400, detail=".pt 파일만 업로드할 수 있습니다")
+    if models_dir.is_preset(original_name):
+        raise HTTPException(
+            status_code=400,
+            detail="custom 파일명은 preset 모델명과 달라야 합니다",
+        )
+
+    directory = models_dir.custom_weights_path().parent
+    directory.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    size_bytes = 0
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=".upload-",
+            suffix=".pt",
+            dir=directory,
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            while chunk := await file.read(1024 * 1024):
+                size_bytes += len(chunk)
+                if size_bytes > models_dir.MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="가중치 파일은 600MB를 초과할 수 없습니다",
+                    )
+                temporary.write(chunk)
+        if size_bytes == 0:
+            raise HTTPException(status_code=400, detail="빈 가중치 파일은 업로드할 수 없습니다")
+
+        classes = models_dir.extract_model_classes(temporary_path)
+        models_dir.activate_custom_weights(
+            temporary_path,
+            original_name=original_name,
+            size_bytes=size_bytes,
+            classes=classes,
+        )
+        temporary_path = None  # os.replace로 custom.pt가 됨
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        await file.close()
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+    active_status, refreshed = _refresh_source_models_and_status(force_reload=True)
+    if not refreshed:
+        response.status_code = 202
+    return active_status
+
+
+@inference_router.delete(
+    "/weights",
+    response_model=WeightsStatus,
+    response_model_exclude_unset=True,
+)
+def reset_custom_weights(response: Response) -> dict:
+    """custom 가중치를 제거하고 단일 활성 모델을 yolo26x.pt로 복귀시킨다."""
+    models_dir.delete_custom_weights()
+    active_status, refreshed = _refresh_source_models_and_status()
+    if not refreshed:
+        response.status_code = 202
+    return active_status
